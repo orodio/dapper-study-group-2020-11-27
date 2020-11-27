@@ -1,70 +1,168 @@
-# Getting Started with Create React App
+# Step 1 - Install
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+```sh
+yarn create react-app demo
+yarn add @onflow/fcl@alpha @onflow/types
+```
 
-## Available Scripts
+Basic Usage
 
-In the project directory, you can run:
+```javascript
+import * as fcl from "@onflow/fcl"
+import * as t from "@onflow/types"
+```
 
-### `yarn start`
+# Step 2 - Configuration
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+- You will need different configuration for local development, testnet and mainnet.
+- It needs to have happened once before any other fcl methods are called.
+- It is recommended to happen in the root of the project.
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+```javascript
+import {config} from "@onflow/fcl"
 
-### `yarn test`
+config()
+  .put("env", "testnet") // used in stored interactions
+  .put("accessNode.api", "https://access-testnet.onflow.org") // which access node we will talk to the chain via
+  .put("challenge.handshake", "https://fcl-discovery.vercel.app/testnet/authn") // Wallet discovery
+  .put("0xProfile", "0x1d007d755706c469") // Centralize contract addressess for when we write cadence
+```
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+# Authentication
 
-### `yarn build`
+```javascript
+import {useState, useEffect} from "react"
+import * as fcl from "@onflow/fcl"
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+export function Auth() {
+  const [user, setUser] = useState({})
+  useEffect(() => fcl.currentUser().subscribe(setUser), [])
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+  if (user.loggedIn == null)
+    return (
+      <div>
+        <button onClick={fcl.signUp}>Sign Up</button>
+        <button onClick={fcl.logIn}>Log In</button>
+      </div>
+    )
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+  return (
+    <div>
+      <button onClick={fcl.unauthenticate}>Log Out</button>
+      <ul>
+        <li>Address: {user.addr}</li>
+        <li>Cid: {user.cid}</li>
+      </ul>
+    </div>
+  )
+}
+```
 
-### `yarn eject`
+# Getting Data From The Chain
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+```javascript
+import * as fcl from "@onflow/fcl"
+import * as t from "@onflow/types"
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+function fetchProfile(address) {
+  if (address == null) Promise.resolve(null)
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+  return fcl
+    .send([
+      fcl.args([fcl.arg(address, t.Address)]),
+      fcl.script`
+      import Profile from 0xProfile
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+      pub fun main(addresss: Address): Profile.ReadOnly? {
+        return Profile.fetchProfile(address)
+      }
+    `,
+    ])
+    .then(fcl.decode)
+}
 
-## Learn More
+export function Profile(address) {
+  const [profile, setProfile] = useState(null)
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+  useEffect(() => {
+    fetchProfile(address).then(setProfile)
+  }, [address])
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+  if (profile == null) return <div>No Profile</div>
 
-### Code Splitting
+  return (
+    <ul>
+      <li>Display Name: {profile.displayName}</li>
+      <li>Color: {profile.color}</li>
+      <li>Avatar: {profile.avatar}</li>
+    </ul>
+  )
+}
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+# Change Data On Chain
 
-### Analyzing the Bundle Size
+```javascript
+import * as fcl from "@onflow/fcl"
+import * as t from "@onflow/types"
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+async function updateDisplayName(displayName) {
+  var txId = fcl
+    .send([
+      fcl.args([fcl.arg(displayName, t.String)]),
+      fcl.proposer(fcl.authz),
+      fcl.payer(fcl.authz),
+      fcl.authorizations([fcl.authz]),
+      fcl.limit(35),
+      fcl.transaction`
+      import Profile from 0xProfile
 
-### Making a Progressive Web App
+      transaction(displayName: String) {
+        prepare(account: AuthAccount) {
+          account
+            .borrow<&{Profile.Owner}>(from: Profile.privatePath)!
+            .setDisplayName(displayName)
+        }
+      }
+    `,
+    ])
+    .then(fcl.decode)
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+  var unsub = fcl
+    .tx(txId)
+    .subscribe(txStatus => console.log(`txStatus[${txId}]`, txStatus))
+  var txStatus = await fcl.tx(txId).onceExecute()
+  unsub()
 
-### Advanced Configuration
+  return txStatus
+}
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+function DisplayNameUpdater() {
+  const [displayName, setDisplayName] = useState("")
+  const [processing, setProcessing] = useState(false)
+  const [txStatus, setTxStatus] = useStatue(null)
 
-### Deployment
+  await function update() {
+    setProcessing(true)
+    setTxStatus(null)
+    await updateDisplayName(displayName).then(setTxStatus)
+    setProcessing(false)
+  }
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `yarn build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+  return (
+    <form>
+      <input
+        value={displayName}
+        onChange={e => setDisplayName(e.target.value)}
+        placeholder="Display Name"
+      />
+      {professing ? (
+        <div>Processing...</div>
+      ) : (
+        <button onClick={update}>Update Display Name</button>
+      )}
+      <pre>{JSON.stringify(txStatus, null, 2)}</pre>
+    </form>
+  )
+}
+```

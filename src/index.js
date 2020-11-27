@@ -1,17 +1,31 @@
-import React from 'react';
-import ReactDOM from 'react-dom';
-import './index.css';
-import App from './App';
-import reportWebVitals from './reportWebVitals';
+import React from "react"
+import ReactDOM from "react-dom"
+import {HashRouter as Router, Route, Switch} from "react-router-dom"
+import reportWebVitals from "./reportWebVitals"
+import {Root} from "./pages/root.page"
+
+import * as fcl from "@onflow/fcl"
+import * as t from "@onflow/types"
+
+window.fcl = fcl
+window.t = t
+
+fcl
+  .config()
+  .put("env", "testnet")
+  .put("accessNode.api", "https://access-testnet.onflow.org") // which access node we will talk to the chain via
+  .put("challenge.handshake", "https://fcl-discovery.vercel.app/testnet/authn") // Wallet discovery
+  .put("0xProfile", "0x1d007d755706c469") // Centralize contract addressess for when we write cadence
 
 ReactDOM.render(
   <React.StrictMode>
-    <App />
+    <Router>
+      <Switch>
+        <Route path="/" component={Root} />
+      </Switch>
+    </Router>
   </React.StrictMode>,
-  document.getElementById('root')
-);
+  document.getElementById("root")
+)
 
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();
+reportWebVitals()
